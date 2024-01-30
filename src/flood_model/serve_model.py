@@ -16,6 +16,7 @@ import xarray as xr
 from src.config import get_env_variable
 
 log = logging.getLogger(__name__)
+_xml_header = {"Content-type": "text/xml"}
 
 
 def convert_nc_to_gtiff(nc_file_path: pathlib.Path) -> pathlib.Path:
@@ -24,7 +25,7 @@ def convert_nc_to_gtiff(nc_file_path: pathlib.Path) -> pathlib.Path:
 
     Parameters
     ----------
-    nc_file_path : pathlib.Patj
+    nc_file_path : pathlib.Path
         The file path to the netCDF file.
 
     Returns
@@ -67,7 +68,6 @@ def upload_gtiff_to_store(
     """
     log.info(f"Uploading {gtiff_filepath.name} to Geoserver workspace {workspace_name}")
 
-
     # Set file copying src and dest
     geoserver_data_root = get_env_variable("DATA_DIR_GEOSERVER", cast_to=pathlib.Path)
     geoserver_data_dest = pathlib.Path("data") / workspace_name / gtiff_filepath.name
@@ -86,7 +86,7 @@ def upload_gtiff_to_store(
     response = requests.post(
         f'{geoserver_url}/workspaces/{workspace_name}/coveragestores',
         params={"configure": "all"},
-        headers={"Content-type": "text/xml"},
+        headers=_xml_header,
         data=data,
         auth=(get_env_variable("GEOSERVER_ADMIN_NAME"), get_env_variable("GEOSERVER_ADMIN_PASSWORD")),
     )
@@ -134,7 +134,7 @@ def create_layer_from_store(geoserver_url: str, layer_name: str, native_crs: str
     response = requests.post(
         f"{geoserver_url}/workspaces/{workspace_name}/coveragestores/{layer_name}/coverages",
         params={"configure": "all"},
-        headers={"Content-type": "text/xml"},
+        headers=_xml_header,
         data=data,
         auth=(get_env_variable("GEOSERVER_ADMIN_NAME"), get_env_variable("GEOSERVER_ADMIN_PASSWORD")),
     )
@@ -177,10 +177,14 @@ def add_gtiff_to_geoserver(gtiff_filepath: pathlib.Path, workspace_name: str, mo
     """
     gs_url = get_geoserver_url()
     layer_name = f"output_{model_id}"
+    # Retrieve CRS info from raster
     with rio.open(gtiff_filepath) as gtiff:
         gtiff_crs = gtiff.crs.wkt
+    # Upload the raster into geoserver
     upload_gtiff_to_store(gs_url, gtiff_filepath, layer_name, workspace_name)
+    # We can remove the temporary raster
     gtiff_filepath.unlink()
+    # Create a GIS layer from the raster file to be served from geoserver
     create_layer_from_store(gs_url, layer_name, gtiff_crs, workspace_name)
 
 
@@ -269,7 +273,7 @@ def create_datastore_layer(workspace_name, data_store_name: str, layer_name, met
     response = requests.post(
         f"{get_geoserver_url()}/workspaces/{workspace_name}/datastores/{data_store_name}/featuretypes",
         params={"configure": "all"},
-        headers={"Content-type": "text/xml"},
+        headers=_xml_header,
         data=data,
         auth=(get_env_variable("GEOSERVER_ADMIN_NAME"), get_env_variable("GEOSERVER_ADMIN_PASSWORD")),
     )
@@ -291,6 +295,8 @@ def create_building_layers(workspace_name: str, data_store_name: str) -> None:
     ----------
     workspace_name : str
         The name of the workspace to create views for
+    data_store_name : str
+         The name of the datastore that the building layer is being created from
 
     Returns
     -------
@@ -302,7 +308,7 @@ def create_building_layers(workspace_name: str, data_store_name: str) -> None:
 
     # More complex layer that has to do dynamic sql queries against model output ID to fetch
     flood_status_layer_name = "building_flood_status"
-    flood_status_xml_query = f"""
+    flood_status_xml_query = rf"""
       <metadata>
         <entry key="JDBC_VIRTUAL_TABLE">
           <virtualTable>
@@ -333,7 +339,10 @@ def create_building_layers(workspace_name: str, data_store_name: str) -> None:
         </entry>
       </metadata>
     """
-    create_datastore_layer(workspace_name, data_store_name, layer_name="building_flood_status", metadata_elem=flood_status_xml_query)
+    create_datastore_layer(workspace_name,
+                           data_store_name,
+                           layer_name="building_flood_status",
+                           metadata_elem=flood_status_xml_query)
 
 
 def create_db_store_if_not_exists(db_name: str, workspace_name: str, new_data_store_name: str) -> None:
@@ -343,8 +352,12 @@ def create_db_store_if_not_exists(db_name: str, workspace_name: str, new_data_st
 
     Parameters
     ----------
+    db_name : str
+        The name of the connected database, to connect datastore to
     workspace_name : str
         The name of the workspace to create views for
+    new_data_store_name : str
+        The name of the new datastore to create
 
     Returns
     -------
@@ -386,7 +399,7 @@ def create_db_store_if_not_exists(db_name: str, workspace_name: str, new_data_st
     response = requests.post(
         f'{get_geoserver_url()}/workspaces/{workspace_name}/datastores',
         params={"configure": "all"},
-        headers={"Content-type": "text/xml"},
+        headers=_xml_header,
         data=create_db_store_data,
         auth=(get_env_variable("GEOSERVER_ADMIN_NAME"), get_env_variable("GEOSERVER_ADMIN_PASSWORD")),
     )
