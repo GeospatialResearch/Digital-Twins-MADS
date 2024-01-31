@@ -23,7 +23,7 @@ from src.flood_model import bg_flood_model
 from src.run_all import DEFAULT_MODULES_TO_PARAMETERS
 
 # Setup celery backend task management
-message_broker_url = f"redis://{get_env_variable('MESSAGE_BROKER_HOST')}:6379/0"
+message_broker_url = f"redis://:{get_env_variable('MESSAGE_BROKER_PASSWORD')}@{get_env_variable('MESSAGE_BROKER_HOST')}:6379/0"
 app = Celery("tasks", backend=message_broker_url, broker=message_broker_url)
 
 setup_logging()

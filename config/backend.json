@@ -1,0 +1,249 @@
+{
+
+    "image": {
+
+        "tag": "1.0",
+
+        "repository": "492544671515.dkr.ecr.ap-southeast-2.amazonaws.com/docker-hub/prasannav98/bgflood"
+
+    },
+
+    "ingress": {
+
+        "enabled": true
+
+    },
+
+    "container": {
+
+        "port": 5000
+
+    },
+
+    "resources": {
+
+        "limits": {
+
+            "cpu": "1",
+
+            "memory": "2Gi"
+
+        },
+
+        "requests": {
+
+            "cpu": "0.25",
+
+            "memory": "0.8Mi"
+
+        }
+
+    },
+
+    "autoscaling": {
+
+        "minReplicas": 1
+
+    },
+
+    "env": [
+
+        {
+
+            "name": "DATA_DIR",
+
+            "value": "/stored_data"
+
+        },
+
+        {
+
+            "name": "DATA_DIR_REC",
+
+            "value": "/stored_data/rec_data"
+
+        },
+
+        {
+
+            "name": "DATA_DIR_GEOSERVER",
+
+            "value": "/stored_data/geoserver"
+
+        },
+
+        {
+
+            "name": "DATA_DIR_MODEL_OUTPUT",
+
+            "value": "/stored_data/model_output"
+
+        },
+
+        {
+
+            "name": "FLOOD_MODEL_DIR",
+
+            "value": "/bg_flood"
+
+        },
+
+        {
+
+            "name": "POSTGRES_HOST",
+
+            "value": "postgres-primary.e355a127-1a08-4e04-a29a-9cce031fd12e.svc"
+
+        },
+
+        {
+
+            "name": "POSTGRES_PORT",
+
+            "value": "5432"
+
+        },
+
+        {
+
+            "name": "POSTGRES_DB",
+
+            "value": "postgres"
+
+        },
+
+        {
+
+            "name": "POSTGRES_USER",
+
+            "value": "Plh=0gM8CZJBW;)g}1qeQAlK"
+
+        },
+
+        {
+
+            "name": "POSTGRES_PASSWORD",
+
+            "value": "postgres"
+
+        },
+
+        {
+
+            "name": "MESSAGE_BROKER_HOST",
+
+            "value": "message-broker-2-redis-master"
+
+        },
+
+        {
+
+            "name": "MESSAGE_BROKER_PASSWORD",
+
+            "value": "lR30TxHxtQ"
+
+        },
+
+
+
+        {
+
+            "name": "GEOSERVER_HOST",
+
+            "value": "http://geoserver"
+
+        },
+
+        {
+
+            "name": "GEOSERVER_PORT",
+
+            "value": "8080"
+
+        },
+
+        {
+
+            "name": "GEOSERVER_ADMIN_NAME",
+
+            "value": "admin"
+
+        },
+
+        {
+
+            "name": "GEOSERVER_ADMIN_PASSWORD",
+
+            "value": "geoserver"
+
+        },
+
+        {
+
+            "name": "STATSNZ_API_KEY",
+
+            "value": "d955c36ec7c9429ab2a1f88609cb48b4"
+
+        },
+
+        {
+
+            "name": "LINZ_API_KEY",
+
+            "value": "93f327def41b476a9d833c5a4ed85474"
+
+        },
+
+        {
+
+            "name": "LRIS_API_KEY",
+
+            "value": ""
+
+        },
+
+        {
+
+            "name": "MFE_API_KEY",
+
+            "value": "3964a330d7304bd4ab37fb3a795e730d"
+
+        },
+
+        {
+
+            "name": "NIWA_API_KEY",
+
+            "value": "7gw8G8IKQF852rgEQiQAnBUJJXazNbuL"
+
+        },
+
+        {
+
+            "name": "LIDAR_DIR",
+
+            "value": "lidar"
+
+        },
+
+        {
+
+            "name": "DEM_DIR",
+
+            "value": "hydro_dem"
+
+        },
+
+        {
+
+            "name": "INSTRUCTIONS_FILE",
+
+            "value": "./instructions.json"
+
+        }
+
+    ],
+
+    "openExternal": false
+
+}
