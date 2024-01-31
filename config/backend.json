@@ -116,7 +116,7 @@
 
             "name": "POSTGRES_USER",
 
-            "value": "Plh=0gM8CZJBW;)g}1qeQAlK"
+            "value": "postgres"
 
         },
 
@@ -124,7 +124,7 @@
 
             "name": "POSTGRES_PASSWORD",
 
-            "value": "postgres"
+            "value": "Plh=0gM8CZJBW;)g}1qeQAlK"
 
         },
 
