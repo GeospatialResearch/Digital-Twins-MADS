@@ -124,7 +124,7 @@
 
             "name": "POSTGRES_PASSWORD",
 
-            "value": "Plh=0gM8CZJBW;)g}1qeQAlK"
+            "value": "password_here"
 
         },
 
@@ -140,7 +140,7 @@
 
             "name": "MESSAGE_BROKER_PASSWORD",
 
-            "value": "lR30TxHxtQ"
+            "value": "password_here"
 
         },
 
@@ -174,7 +174,7 @@
 
             "name": "GEOSERVER_ADMIN_PASSWORD",
 
-            "value": "geoserver"
+            "value": "password_here"
 
         },
 
@@ -182,7 +182,7 @@
 
             "name": "STATSNZ_API_KEY",
 
-            "value": "d955c36ec7c9429ab2a1f88609cb48b4"
+            "value": "key_here"
 
         },
 
@@ -190,7 +190,7 @@
 
             "name": "LINZ_API_KEY",
 
-            "value": "93f327def41b476a9d833c5a4ed85474"
+            "value": "key_here"
 
         },
 
@@ -206,7 +206,7 @@
 
             "name": "MFE_API_KEY",
 
-            "value": "3964a330d7304bd4ab37fb3a795e730d"
+            "value": "key_here"
 
         },
 
@@ -214,7 +214,7 @@
 
             "name": "NIWA_API_KEY",
 
-            "value": "7gw8G8IKQF852rgEQiQAnBUJJXazNbuL"
+            "value": "key_here"
 
         },
 
