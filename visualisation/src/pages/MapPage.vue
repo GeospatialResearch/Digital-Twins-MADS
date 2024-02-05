@@ -11,7 +11,7 @@
       <input
         v-if="column.min && column.max"
         type="number"
-        v-model="selectedOption[column.name]"
+        v-model.number="selectedOption[column.name]"
         :min="column.min"
         :max="column.max"
       >
@@ -26,6 +26,7 @@
       :scenario-options="selectedOption"
       @task-posted="onTaskPosted"
       @task-completed="onTaskCompleted"
+      @task-failed="onTaskFailed"
     />
     <img id="legend" alt="Legend graphic showing how colour relates to depth" src="viridis_legend.png">
   </div>
@@ -37,6 +38,7 @@ import * as Cesium from "cesium";
 import {MapViewer} from 'geo-visualisation-components/src/components';
 import titleMixin from "@/mixins/title";
 import {Bbox, MapViewerDataSourceOptions, Scenario} from "geo-visualisation-components/src/types";
+import {AxiosError} from "axios";
 
 export default Vue.extend({
   name: "MapPage",
@@ -66,6 +68,7 @@ export default Vue.extend({
         confidenceLevel: {name: "Confidence Level", data: ['low', 'medium']},
         addVerticalLandMovement: {name: "Add Vertical Land Movement", data: [true, false]}
       },
+      projYear: 2050,
       // Default selected options for parameters
       selectedOption: {
         "Projected Year": 2050,
@@ -111,6 +114,13 @@ export default Vue.extend({
         geoJsonDataSources,
         imageryProviders: [floodRasterProvider]
       }
+    },
+    /**
+     * When a task fails, reset the data sources to blank map
+     */
+    async onTaskFailed(event: {err: AxiosError}) {
+      this.dataSources = {};
+      console.log(event)
     },
     /**
      * Creates ImageryProvider from geoserver WMS for the flood raster.
