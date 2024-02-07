@@ -36,6 +36,7 @@ class OnFailureStateTask(app.Task):
     def on_failure(self, _exc, _task_id, _args, _kwargs, _einfo):
         self.update_state(state=states.FAILURE)
 
+
 class DepthTimePlot(NamedTuple):
     """
     Represents the depths over time for a particular pixel location in a raster.
@@ -51,6 +52,7 @@ class DepthTimePlot(NamedTuple):
     """
     depths: List[float]
     times: List[float]
+
 
 def create_model_for_area(selected_polygon_wkt: str, scenario_options: dict) -> result.GroupResult:
     """
@@ -96,14 +98,15 @@ def ensure_lidar_datasets_initialised() -> None:
         # If it is not initialised, then initialise it
         newzealidar.datasets.main()
     # Check that datasets_mapping is in the instructions.json file
-    with open("instructions.json", "r") as instructions_file:
+    instructions_file_name = "instructions.json"
+    with open(instructions_file_name, "r") as instructions_file:
         # Load content from the file
         instructions = json.load(instructions_file)["instructions"]
-        dataset_mapping = instructions.get("dataset_mapping")
-        # If the dataset_mapping does not exist on the instruction file then read it from the database
-        if dataset_mapping is None:
-            # Add dataset_mapping to instructions file, reading from database
-            newzealidar.utils.map_dataset_name(engine, instructions_file)
+    dataset_mapping = instructions.get("dataset_mapping")
+    # If the dataset_mapping does not exist on the instruction file then read it from the database
+    if dataset_mapping is None:
+        # Add dataset_mapping to instructions file, reading from database
+        newzealidar.utils.map_dataset_name(engine, instructions_file_name)
 
 
 @app.task(base=OnFailureStateTask)
@@ -312,7 +315,7 @@ def get_depth_by_time_at_point(model_id: int, lat: float, lng: float) -> DepthTi
     with xarray.open_dataset(model_file_path) as ds:
         transformer = Transformer.from_crs(4326, 2193)
         y, x = transformer.transform(lat, lng)
-        da = ds["hmax_P0"].sel(x=x, y=y, method="nearest")
+        da = ds["hmax_P0"].sel(xx_P0=x, yy_P0=y, method="nearest")
 
     depths = da.values.tolist()
     times = da.coords['time'].values.tolist()

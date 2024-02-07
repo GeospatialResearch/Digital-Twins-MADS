@@ -4,7 +4,7 @@ The main web application that serves the Digital Twin to the web through a Rest 
 import logging
 import pathlib
 from functools import wraps
-from http.client import OK, ACCEPTED, BAD_REQUEST, INTERNAL_SERVER_ERROR
+from http.client import OK, ACCEPTED, BAD_REQUEST, INTERNAL_SERVER_ERROR, SERVICE_UNAVAILABLE
 from typing import Callable
 
 import requests
@@ -18,7 +18,9 @@ from src.config import get_env_variable
 
 # Initialise flask server object
 app = Flask(__name__)
-CORS(app, origins=["http://localhost:8080"])
+WWW_HOST = get_env_variable('WWW_HOST', default="http://localhost")
+WWW_PORT = get_env_variable('WWW_port', default="8080")
+CORS(app, origins=[f"{WWW_HOST}:{WWW_PORT}"])
 
 
 def check_celery_alive(f: Callable[..., Response]) -> Callable[..., Response]:
@@ -32,8 +34,8 @@ def check_celery_alive(f: Callable[..., Response]) -> Callable[..., Response]:
 
     Returns
     -------
-    Response
-        INTERNAL_SERVER_ERROR if the celery workers are down, otherwise continue to function f
+    Callable[..., Response]
+        Response is SERVICE_UNAVAILABLE if the celery workers are down, otherwise continue to function f
     """
 
     @wraps(f)
@@ -41,10 +43,24 @@ def check_celery_alive(f: Callable[..., Response]) -> Callable[..., Response]:
         ping_celery_response = tasks.app.control.ping()
         if len(ping_celery_response) == 0:
             logging.warning("Celery workers not active, may indicate a fault")
-            return make_response("Celery workers not active", INTERNAL_SERVER_ERROR)
+            return make_response("Celery workers not active", SERVICE_UNAVAILABLE)
         return f(*args, **kwargs)
 
     return decorated_function
+
+
+@app.route('/')
+def index() -> Response:
+    """
+    Ping this endpoint to check that the flask app is running
+    Supported methods: GET
+
+    Returns
+    -------
+    Response
+        The HTTP Response. Expect OK if health check is successful
+    """
+    return Response("Backend is receiving requests. GET /health-check to check if celery workers active.", OK)
 
 
 @app.route('/health-check')
@@ -211,7 +227,11 @@ def get_depth_at_point(task_id: str) -> Response:
     model_task_result = result.AsyncResult(task_id, app=tasks.app)
     status = model_task_result.status
     if status != states.SUCCESS:
-        return make_response(f"Task {task_id} has status {status}, not {states.SUCCESS}", BAD_REQUEST)
+        response = make_response(f"Task {task_id} has status {status}, not {states.SUCCESS}", BAD_REQUEST)
+        # Explicitly set content-type because task_id may make browsers visiting this endpoint vulnerable to XSS
+        # For more info: SonarCloud RuleID pythonsecurity:S5131
+        response.mimetype = "text/plain"
+        return response
 
     model_id = model_task_result.get()
     depth_task = tasks.get_depth_by_time_at_point.delay(model_id, lat, lng)

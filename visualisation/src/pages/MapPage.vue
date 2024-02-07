@@ -11,7 +11,7 @@
       <input
         v-if="column.min && column.max"
         type="number"
-        v-model="selectedOption[column.name]"
+        v-model.number="selectedOption[column.name]"
         :min="column.min"
         :max="column.max"
       >
@@ -26,6 +26,7 @@
       :scenario-options="selectedOption"
       @task-posted="onTaskPosted"
       @task-completed="onTaskCompleted"
+      @task-failed="onTaskFailed"
     />
     <img id="legend" alt="Legend graphic showing how colour relates to depth" src="viridis_legend.png">
   </div>
@@ -37,6 +38,7 @@ import * as Cesium from "cesium";
 import {MapViewer} from 'geo-visualisation-components/src/components';
 import titleMixin from "@/mixins/title";
 import {Bbox, MapViewerDataSourceOptions, Scenario} from "geo-visualisation-components/src/types";
+import {AxiosError} from "axios";
 
 export default Vue.extend({
   name: "MapPage",
@@ -66,6 +68,7 @@ export default Vue.extend({
         confidenceLevel: {name: "Confidence Level", data: ['low', 'medium']},
         addVerticalLandMovement: {name: "Add Vertical Land Movement", data: [true, false]}
       },
+      projYear: 2050,
       // Default selected options for parameters
       selectedOption: {
         "Projected Year": 2050,
@@ -80,16 +83,11 @@ export default Vue.extend({
           host: process.env.VUE_APP_GEOSERVER_HOST,
           port: process.env.VUE_APP_GEOSERVER_PORT
         },
+        db: {
+          name: process.env.VUE_APP_POSTGRES_DB
+        }
       },
     }
-  },
-  async mounted() {
-    // Limit scrolling on this page
-    document.body.style.overflow = "hidden"
-  },
-  beforeDestroy() {
-    // Reset scrolling for other pages
-    document.body.style.overflow = ""
   },
   methods: {
     /**
@@ -97,7 +95,7 @@ export default Vue.extend({
      *
      * @param event The @task-posted event passed up from MapViewer
      */
-    async onTaskPosted(event: {bbox: Bbox}) {
+    async onTaskPosted(event: { bbox: Bbox }) {
       // Wipe existing data sources while new ones are being loaded
       this.dataSources = {}
       const bbox = event.bbox
@@ -118,13 +116,20 @@ export default Vue.extend({
       }
     },
     /**
+     * When a task fails, reset the data sources to blank map
+     */
+    async onTaskFailed(event: {err: AxiosError}) {
+      this.dataSources = {};
+      console.log(event)
+    },
+    /**
      * Creates ImageryProvider from geoserver WMS for the flood raster.
      *
      * @param model_output_id The id of the flood raster to fetch
      */
     async fetchFloodRaster(model_output_id: number): Promise<Cesium.WebMapServiceImageryProvider> {
       const wmsOptions = {
-        url: `${this.env.geoserver.host}:${this.env.geoserver.port}/geoserver/dt-model-outputs/wms`,
+        url: `${this.env.geoserver.host}:${this.env.geoserver.port}/geoserver/${this.env.db.name}-dt-model-outputs/wms`,
         layers: `output_${model_output_id}`,
         parameters: {
           service: 'WMS',
@@ -143,8 +148,10 @@ export default Vue.extend({
      */
     async loadBuildingGeojson(bbox: Bbox, scenarioId = -1): Promise<Cesium.GeoJsonDataSource[]> {
       // Create geoserver url based on bbox and scenarioId
-      const buildingStatusUrl = `${this.env.geoserver.host}:${this.env.geoserver.port}/geoserver/digitaltwin/ows`
-        + '?service=WFS&version=1.0.0&request=GetFeature&typeName=digitaltwin%3Abuilding_flood_status'
+      const gsWorkspaceName = `${this.env.db.name}-buildings`
+      const buildingStatusUrl = `${this.env.geoserver.host}:${this.env.geoserver.port}/geoserver/`
+        + `${gsWorkspaceName}/ows?service=WFS&version=1.0.0&request=GetFeature`
+        + `&typeName=${gsWorkspaceName}%3Abuilding_flood_status`
         + `&outputFormat=application%2Fjson&srsName=EPSG:4326&viewparams=scenario:${scenarioId}`
         + `&cql_filter=bbox(geometry,${bbox.lng1},${bbox.lat1},${bbox.lng2},${bbox.lat2},'EPSG:4326')`
       const floodBuildingDS = await Cesium.GeoJsonDataSource.load(
