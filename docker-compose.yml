@@ -118,11 +118,14 @@ services:
     # Communicates between backend and workers to assign tasks and store state
     image: redis:7
     container_name: message_broker_digital_twin
+    command:
+      - /bin/sh
+      - -c
+      - redis-server --requirepass "${MESSAGE_BROKER_PASSWORD}"
     ports:
       - "6379:6379"
     healthcheck:
       test: redis-cli ping | grep PONG
       timeout: 1s
       retries: 10
-
     restart: always
