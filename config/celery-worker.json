@@ -14,6 +14,12 @@
 
     },
 
+    "container": {
+
+        "port": 5001
+
+    },
+
     "resources": {
 
         "limits": {
