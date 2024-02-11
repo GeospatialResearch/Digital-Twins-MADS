@@ -2,9 +2,9 @@
 
     "image": {
 
-        "tag": "1.3",
+        "tag": "2.5",
 
-        "repository": "492544671515.dkr.ecr.ap-southeast-2.amazonaws.com/docker-hub/lparkinson/backend-flood-resilience-dt"
+        "repository": "492544671515.dkr.ecr.ap-southeast-2.amazonaws.com/docker-hub/prasannav98/bgflood"
 
     },
 
