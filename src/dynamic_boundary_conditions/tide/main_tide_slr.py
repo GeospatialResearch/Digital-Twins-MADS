@@ -9,6 +9,7 @@ import pathlib
 from typing import Union
 
 import geopandas as gpd
+import boto3
 
 from src import config
 from src.digitaltwin import setup_environment
@@ -26,7 +27,17 @@ from src.dynamic_boundary_conditions.tide import (
 log = logging.getLogger(__name__)
 
 
-def remove_existing_boundary_inputs(bg_flood_dir: pathlib.Path) -> None:
+def create_s3_bucket_connection(dir: pathlib.Path) -> boto3.session.Session.resource:
+    session = boto3.Session(
+        aws_access_key_id='AKIAXFLPTH4NXGZTNV6Y',
+        aws_secret_access_key='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',
+    )
+    bucket_name = 'temp-960db4fa-d048-4a7c-9221-0d53fcd278e5'
+    s3 = session.resource('s3')
+    return s3
+
+
+def remove_existing_boundary_inputs(bg_flood_dir: pathlib.Path, s3: boto3.session.Session.resource, bucket_name: str) -> None:
     """
     Remove existing uniform boundary input files from the specified directory.
 
@@ -39,11 +50,16 @@ def remove_existing_boundary_inputs(bg_flood_dir: pathlib.Path) -> None:
     -------
     None
         This function does not return any value.
+        :param s3:
     """
     # Iterate through all boundary files in the directory
-    for boundary_file in bg_flood_dir.glob('*_bnd.txt'):
-        # Remove the file
-        boundary_file.unlink()
+    # for boundary_file in bg_flood_dir.glob('*_bnd.txt'):
+    #     # Remove the file
+    #     boundary_file.unlink()
+    bucket = s3.Bucket(bucket_name)
+    for obj in bucket.objects.all():
+        if obj.key.endswith('_bnd.txt'):
+            obj.delete()
 
 
 def main(
@@ -109,7 +125,8 @@ def main(
         # BG-Flood Model Directory
         bg_flood_dir = config.get_env_variable("FLOOD_MODEL_DIR", cast_to=pathlib.Path)
         # Remove any existing uniform boundary model inputs in the BG-Flood directory
-        remove_existing_boundary_inputs(bg_flood_dir)
+        bucket_name = 'temp-960db4fa-d048-4a7c-9221-0d53fcd278e5'
+        remove_existing_boundary_inputs(bg_flood_dir, create_s3_bucket_connection(bg_flood_dir), bucket_name)
 
         # Get the locations used to fetch tide data
         tide_query_loc = tide_query_location.get_tide_query_locations(engine, catchment_area)

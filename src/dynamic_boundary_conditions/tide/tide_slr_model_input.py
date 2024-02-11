@@ -8,6 +8,8 @@ import pathlib
 
 import pandas as pd
 
+import boto3
+
 from src.dynamic_boundary_conditions.tide import main_tide_slr
 
 log = logging.getLogger(__name__)
