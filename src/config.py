@@ -1,5 +1,5 @@
 import os
-from typing import TypeVar
+from typing import Type, TypeVar
 
 from dotenv import load_dotenv
 
@@ -7,9 +7,11 @@ from dotenv import load_dotenv
 T = TypeVar("T", str, bool, int, float)
 
 load_dotenv()
+load_dotenv("api_keys.env")
 
 
-def get_env_variable(var_name: str, default: T = None, allow_empty: bool = False, cast_to: type = str) -> T:
+def get_env_variable(var_name: str,
+                     default: T = None, allow_empty: bool = False, cast_to: Type[T] = str) -> T:
     """
     Reads an environment variable, with settings to allow defaults, empty values, and type casting
     To read a boolean EXAMPLE_ENV_VAR=False use get_env_variable("EXAMPLE_ENV_VAR", cast_to=bool)
@@ -22,7 +24,7 @@ def get_env_variable(var_name: str, default: T = None, allow_empty: bool = False
         Default return value if the environment variable does not exist. Doesn't override empty string vars.
     allow_empty : bool
         If False then a KeyError will be raised if the environment variable is empty.
-    cast_to : Callable[[str], T]
+    cast_to : Type[T]
         The type to cast to e.g. str, int, or bool
 
     Returns
@@ -39,20 +41,22 @@ def get_env_variable(var_name: str, default: T = None, allow_empty: bool = False
     env_var = os.getenv(var_name, default)
     if not allow_empty and env_var in (None, ""):
         raise KeyError(f"Environment variable {var_name} not set, and allow_empty is False")
+    if type(env_var) == cast_to:
+        return env_var
     return _cast_str(env_var, cast_to)
 
 
-def _cast_str(str_to_cast: str, cast_to: T) -> T:
+def _cast_str(str_to_cast: str, cast_to: Type[T]) -> T:
     """
     Takes a string and casts it to necessary primitive builtin types. Tested with int, float, and bool.
-    For bools, this detects if the value is in the case-insensitive sets {"True", "T", "1"} or {"False", "F", "0"}
+    For bool, this detects if the value is in the case-insensitive sets {"True", "T", "1"} or {"False", "F", "0"}
     and raises a ValueError if not. For example _cast_str("False", bool) -> False
 
     Parameters
     ----------
     str_to_cast : str
         The string that is going to be casted to the type
-    cast_to : Callable[[str], T]
+    cast_to : Type[T]
         The type to cast to e.g. bool
 
     Returns
@@ -67,11 +71,11 @@ def _cast_str(str_to_cast: str, cast_to: T) -> T:
     if cast_to == bool:
         # For bool we have the problem where bool("False") == True but we want this function to return False
         truth_values = {"true", "t", "1"}
-        false_values = {"false", "f", "0"}
-        if str_to_cast.lower() in truth_values:
-            return True
-        elif str_to_cast.lower() in false_values:
+        false_values = {"false", "f", "0", ""}
+        if str_to_cast is None or str_to_cast.lower() in false_values:
             return False
+        elif str_to_cast.lower() in truth_values:
+            return True
         raise ValueError(f"{str_to_cast} being casted to bool but is not in {truth_values} or {false_values}")
     # General case
     return cast_to(str_to_cast)

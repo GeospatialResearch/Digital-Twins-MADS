@@ -30,10 +30,10 @@ def generate_flood_model() -> str:
     # Create request data for getting flood model data from a region over Kaiapoi
     request_data = {
         "bbox": {
-            "lat1": -43.38205648955185,
-            "lng1": 172.6487081332888,
-            "lng2": 172.66,
-            "lat2": -43.40
+            "lat1": -43.370613130921434,
+            "lng1": 172.65156000179044,
+            "lng2": 172.71678302522903,
+            "lat2": -43.400136655560765
         },
         "scenarioOptions": {
             "Projected Year": 2050,
@@ -60,12 +60,12 @@ def poll_for_completion(task_id: str) -> int:
         # 5 Second delay before retrying
         time.sleep(5)
         print("Polling backend for task completion...")
-
         # Get status of a task
         task_status_response = requests.get(f"{backend_url}/tasks/{task_id}")
+        response_body = task_status_response.json()
+        print(response_body)
         task_status_response.raise_for_status()
         # Load the body JSON into a python dict
-        response_body = json.loads(task_status_response.text)
         task_status = response_body["taskStatus"]
     task_value = response_body['taskValue']
     print(f"Task completed with value {task_value}")
@@ -83,7 +83,6 @@ def get_building_statuses(model_id: int) -> GeoDataFrame:
     return GeoDataFrame.from_features(building_json["features"])
 
 
-
 def get_depths_at_point(task_id: str):
     point = {"lat": -43.39, "lng": 172.65}
     # Send a request to get the depths at a point for a flood model associated with a task
@@ -95,6 +94,18 @@ def get_depths_at_point(task_id: str):
     # Load the body JSON into a python dict
     response_body = depths_response.json()
     print(response_body)
+
+
+def fetch_new_dataset_table():
+    # Update LiDAR datasets, takes a long time.
+    print("Refreshing LiDAR OpenTopography URLs to get newest LiDAR data")
+    update_datasets_response = requests.post(f"{backend_url}/datasets/update")
+    # Check for errors (400/500 codes)
+    update_datasets_response.raise_for_status()
+    # Load the body JSON into a python dict
+    response_body = json.loads(update_datasets_response.text)
+    # Read the task id
+    return response_body["taskId"]
 
 
 def stop_task(task_id: str):

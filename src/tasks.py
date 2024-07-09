@@ -2,19 +2,20 @@
 Runs backend tasks using Celery. Allowing for multiple long-running tasks to complete in the background.
 Allows the frontend to send tasks and retrieve status later.
 """
+import json
 import logging
-from typing import List, Tuple
+import traceback
+from typing import List, NamedTuple
 
 import geopandas as gpd
-import pandas as pd
+import newzealidar
 import shapely
 import xarray
 from celery import Celery, states, result
-from newzealidar import process
 from pyproj import Transformer
 
 from src.config import get_env_variable
-from src.digitaltwin import retrieve_static_boundaries, setup_environment
+from src.digitaltwin import retrieve_static_boundaries, setup_environment, tables
 from src.digitaltwin.utils import setup_logging
 from src.dynamic_boundary_conditions.rainfall import main_rainfall
 from src.dynamic_boundary_conditions.river import main_river
@@ -33,14 +34,34 @@ log = logging.getLogger(__name__)
 class OnFailureStateTask(app.Task):
     """Task that switches state to FAILURE if an exception occurs"""
 
-    def on_failure(self, _exc, _task_id, _args, _kwargs, _einfo):
-        self.update_state(state=states.FAILURE)
+    def on_failure(self, exc, _task_id, _args, _kwargs, _einfo):
+        self.update_state(state=states.FAILURE, meta={
+            "exc_type": type(exc).__name__,
+            "exc_message": traceback.format_exc().split('\n'),
+            "extra": None
+        })
 
 
-# noinspection PyUnnecessaryBackslash
+class DepthTimePlot(NamedTuple):
+    """
+    Represents the depths over time for a particular pixel location in a raster.
+    Uses tuples and lists instead of Arrays or Dataframes because it needs to be easily serializable when communicating
+    over message_broker
+
+    Attributes
+    ----------
+    depths : List[float]
+        A list of all of the depths in m for the pixel. Parallels the times list
+    times : List[float]
+        A list of all of the times in s for the pixel. Parallels the depts list
+    """
+    depths: List[float]
+    times: List[float]
+
+
 def create_model_for_area(selected_polygon_wkt: str, scenario_options: dict) -> result.GroupResult:
     """
-    Creates a model for the area using series of chained (sequential) and grouped (parallel) sub-tasks.
+    Creates a model for the area using series of chained (sequential) sub-tasks.
 
     Parameters
     ----------
@@ -52,13 +73,45 @@ def create_model_for_area(selected_polygon_wkt: str, scenario_options: dict) -> 
     result.GroupResult
         The task result for the long-running group of tasks. The task ID represents the final task in the group.
     """
-    return (add_base_data_to_db.si(selected_polygon_wkt) |
+    return (
+            ensure_lidar_datasets_initialised.si() |
+            add_base_data_to_db.si(selected_polygon_wkt) |
             process_dem.si(selected_polygon_wkt) |
             generate_rainfall_inputs.si(selected_polygon_wkt) |
             generate_tide_inputs.si(selected_polygon_wkt, scenario_options) |
             generate_river_inputs.si(selected_polygon_wkt) |
             run_flood_model.si(selected_polygon_wkt)
-            )()
+    )()
+
+
+@app.task(base=OnFailureStateTask)
+def ensure_lidar_datasets_initialised() -> None:
+    """
+    Task checks if LiDAR datasets table is initialised.
+    This table holds URLs to data sources for LiDAR.
+    If it is not initialised, then it initialises it by web-scraping OpenTopography which takes a long time.
+
+    Returns
+    -------
+    None
+        This task does not return anything
+    """
+    # Connect to database
+    engine = setup_environment.get_connection_from_profile()
+    # Check if datasets table initialised
+    if not tables.check_table_exists(engine, "dataset"):
+        # If it is not initialised, then initialise it
+        newzealidar.datasets.main()
+    # Check that datasets_mapping is in the instructions.json file
+    instructions_file_name = "instructions.json"
+    with open(instructions_file_name, "r") as instructions_file:
+        # Load content from the file
+        instructions = json.load(instructions_file)["instructions"]
+    dataset_mapping = instructions.get("dataset_mapping")
+    # If the dataset_mapping does not exist on the instruction file then read it from the database
+    if dataset_mapping is None:
+        # Add dataset_mapping to instructions file, reading from database
+        newzealidar.utils.map_dataset_name(engine, instructions_file_name)
 
 
 @app.task(base=OnFailureStateTask)
@@ -96,9 +149,9 @@ def process_dem(selected_polygon_wkt: str):
     None
         This task does not return anything
     """
-    parameters = DEFAULT_MODULES_TO_PARAMETERS[process]
+    parameters = DEFAULT_MODULES_TO_PARAMETERS[newzealidar.process]
     selected_polygon = wkt_to_gdf(selected_polygon_wkt)
-    process.main(selected_polygon, **parameters)
+    newzealidar.process.main(selected_polygon, **parameters)
 
 
 @app.task(base=OnFailureStateTask)
@@ -185,6 +238,20 @@ def run_flood_model(selected_polygon_wkt: str) -> int:
     return flood_model_id
 
 
+@app.task(base=OnFailureStateTask)
+def refresh_lidar_datasets() -> None:
+    """
+    Web-scrapes OpenTopography metadata to create the datasets table containing links to LiDAR data sources.
+    Takes a long time to run but needs to be run periodically so that the datasets are up to date
+
+    Returns
+    -------
+    None
+        This task does not return anything
+    """
+    newzealidar.datasets.main()
+
+
 def wkt_to_gdf(wkt: str) -> gpd.GeoDataFrame:
     """
     Transforms a WKT string polygon into a GeoDataFrame
@@ -211,7 +278,25 @@ def wkt_to_gdf(wkt: str) -> gpd.GeoDataFrame:
 
 
 @app.task(base=OnFailureStateTask)
-def get_depth_by_time_at_point(model_id: int, lat: float, lng: float) -> Tuple[List[float], List[float]]:
+def get_model_output_filepath_from_model_id(model_id: int) -> str:
+    """
+    Task to query the database and find the filepath for the model output for the model_id.
+
+    Parameters
+    ----------
+    model_id : int
+        The database id of the model output to query.
+
+    Returns
+    -------
+    str
+        Serialized posix-style str version of the filepath
+    """
+    return bg_flood_model.model_output_from_db_by_id(model_id).as_posix()
+
+
+@app.task(base=OnFailureStateTask)
+def get_depth_by_time_at_point(model_id: int, lat: float, lng: float) -> DepthTimePlot:
     """
     Task to query a point in a flood model output and return the list of depths and times.
 
@@ -227,18 +312,19 @@ def get_depth_by_time_at_point(model_id: int, lat: float, lng: float) -> Tuple[L
 
     Returns
     -------
-    Tuple[List[float], List[float]]
+    DepthTimePlot
         Tuple of depths list and times list for the pixel in the output nearest to the point.
     """
-    model_file_path = bg_flood_model.model_output_from_db_by_id(model_id).as_posix()
+    engine = setup_environment.get_connection_from_profile()
+    model_file_path = bg_flood_model.model_output_from_db_by_id(engine, model_id).as_posix()
     with xarray.open_dataset(model_file_path) as ds:
         transformer = Transformer.from_crs(4326, 2193)
         y, x = transformer.transform(lat, lng)
-        da = ds["hmax_P0"].sel(x=x, y=y, method="nearest")
+        da = ds["hmax_P0"].sel(xx_P0=x, yy_P0=y, method="nearest")
 
     depths = da.values.tolist()
     times = da.coords['time'].values.tolist()
-    return depths, times
+    return DepthTimePlot(depths, times)
 
 
 @app.task(base=OnFailureStateTask)
@@ -256,43 +342,9 @@ def get_model_extents_bbox(model_id: int) -> str:
     str:
         The bounding box in '[x1],[y1],[x2],[y2]' format
     """
-    extents = bg_flood_model.model_extents_from_db_by_id(model_id).geometry[0]
+    engine = setup_environment.get_connection_from_profile()
+    extents = bg_flood_model.model_extents_from_db_by_id(engine, model_id).geometry[0]
     # Retrieve a tuple of the corners of the extents
     bbox_corners = extents.bounds
     # Convert the tuple into a string in [x1],[y1],[x2],[y2]
     return ",".join(map(str, bbox_corners))
-
-
-
-
-@app.task(base=OnFailureStateTask)
-def get_distinct_column_values(table_name: str) -> dict:
-    engine = setup_environment.get_database()
-    column_names = pd.read_sql(
-        "SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name=%(table_name)s",
-        engine, params={'table_name': 'sea_level_rise'})
-    distinct_column_values = {}
-    for col_name, in column_names.values:
-        if col_name not in ("siteid", "lon", "lat", "region", "geometry"):
-            # Can use fstring here because the variables have been sanitised above
-            distinct_values = pd.read_sql(f"SELECT DISTINCT {col_name} FROM {table_name} ORDER BY {col_name}", engine)
-            if col_name== "measurementname" and table_name=="sea_level_rise":
-                distinct_column_values['confidence_level'] = distinct_values['measurementname'].str.extract(
-                    r'(low|medium) confidence')[0].unique().tolist()
-                # Extract the 'ssp_scenario' information from the 'measurementname' column
-                distinct_column_values['ssp_scenario'] = distinct_values['measurementname'].str.extract(r'(\w+-\d\.\d)')[0].unique().tolist()
-                # Extract for the presence of '+ VLM' in the 'measurementname' column
-                distinct_column_values['add_vlm'] = [True, False]
-            else:
-                distinct_column_values[col_name] = distinct_values.values.ravel().tolist()
-
-    return distinct_column_values
-
-
-if __name__ == '__main__':
-    # llat = -43.38205648955185
-    # llng = 172.6487081332888
-    # id = 82
-    # get_depth_by_time_at_point(82, llat, llng)
-    x = get_distinct_column_values("sea_level_rise")
-    print(x)
