@@ -2,13 +2,14 @@
 The main web application that serves the Digital Twin to the web through a Rest API.
 """
 import logging
+import pathlib
 from functools import wraps
-from http.client import OK, ACCEPTED, BAD_REQUEST, INTERNAL_SERVER_ERROR
+from http.client import OK, ACCEPTED, BAD_REQUEST, INTERNAL_SERVER_ERROR, SERVICE_UNAVAILABLE
 from typing import Callable
 
 import requests
 from celery import result, states
-from flask import Flask, Response, jsonify, make_response, request
+from flask import Flask, Response, jsonify, make_response, send_file, request
 from flask_cors import CORS
 from shapely import box
 
@@ -17,7 +18,9 @@ from src.config import get_env_variable
 
 # Initialise flask server object
 app = Flask(__name__)
-CORS(app, origins=["http://localhost:8080"])
+WWW_HOST = get_env_variable('WWW_HOST', default="http://localhost")
+WWW_PORT = get_env_variable('WWW_port', default="8080")
+CORS(app, origins=[f"{WWW_HOST}:{WWW_PORT}"])
 
 
 def check_celery_alive(f: Callable[..., Response]) -> Callable[..., Response]:
@@ -31,8 +34,8 @@ def check_celery_alive(f: Callable[..., Response]) -> Callable[..., Response]:
 
     Returns
     -------
-    Response
-        INTERNAL_SERVER_ERROR if the celery workers are down, otherwise continue to function f
+    Callable[..., Response]
+        Response is SERVICE_UNAVAILABLE if the celery workers are down, otherwise continue to function f
     """
 
     @wraps(f)
@@ -40,10 +43,24 @@ def check_celery_alive(f: Callable[..., Response]) -> Callable[..., Response]:
         ping_celery_response = tasks.app.control.ping()
         if len(ping_celery_response) == 0:
             logging.warning("Celery workers not active, may indicate a fault")
-            return make_response("Celery workers not active", INTERNAL_SERVER_ERROR)
+            return make_response("Celery workers not active", SERVICE_UNAVAILABLE)
         return f(*args, **kwargs)
 
     return decorated_function
+
+
+@app.route('/')
+def index() -> Response:
+    """
+    Ping this endpoint to check that the flask app is running
+    Supported methods: GET
+
+    Returns
+    -------
+    Response
+        The HTTP Response. Expect OK if health check is successful
+    """
+    return Response("Backend is receiving requests. GET /health-check to check if celery workers active.", OK)
 
 
 @app.route('/health-check')
@@ -79,10 +96,16 @@ def get_status(task_id: str) -> Response:
     """
     task_result = result.AsyncResult(task_id, app=tasks.app)
     status = task_result.status
-    task_value = task_result.get() if status == states.SUCCESS else None
     http_status = OK
-    if status == states.FAILURE:
+    if status == states.SUCCESS:
+        task_value = task_result.get()
+    elif status == states.FAILURE:
         http_status = INTERNAL_SERVER_ERROR
+        is_debug_mode = get_env_variable("DEBUG_TRACEBACK", default=False, cast_to=bool)
+        task_value = task_result.traceback if is_debug_mode else None
+    else:
+        task_value = None
+
     return make_response(jsonify({
         "taskId": task_result.id,
         "taskStatus": status,
@@ -194,7 +217,7 @@ def get_depth_at_point(task_id: str) -> Response:
     Returns
     -------
     Response
-        Returns JSON response in the form {"depth": Arrau<number>,  "time": Array<number>} representing the values
+        Returns JSON response in the form {"depth": Array<number>,  "time": Array<number>} representing the values
         for the given point.
     """
     try:
@@ -210,7 +233,11 @@ def get_depth_at_point(task_id: str) -> Response:
     model_task_result = result.AsyncResult(task_id, app=tasks.app)
     status = model_task_result.status
     if status != states.SUCCESS:
-        return make_response(f"Task {task_id} has status {status}, not {states.SUCCESS}", BAD_REQUEST)
+        response = make_response(f"Task {task_id} has status {status}, not {states.SUCCESS}", BAD_REQUEST)
+        # Explicitly set content-type because task_id may make browsers visiting this endpoint vulnerable to XSS
+        # For more info: SonarCloud RuleID pythonsecurity:S5131
+        response.mimetype = "text/plain"
+        return response
 
     model_id = model_task_result.get()
     depth_task = tasks.get_depth_by_time_at_point.delay(model_id, lat, lng)
@@ -251,7 +278,9 @@ def retrieve_building_flood_status(model_id: int) -> Response:
     workspace_name = f"{db_name}-buildings"
     store_name = f"{db_name} PostGIS"
     # Set up geoserver request parameters
-    request_url = f"http://localhost:8088/geoserver/{workspace_name}/ows"
+    geoserver_host = get_env_variable("GEOSERVER_HOST")
+    geoserver_port = get_env_variable("GEOSERVER_PORT")
+    request_url = f"{geoserver_host}:{geoserver_port}/geoserver/{workspace_name}/ows"
     params = {
         "service": "WFS",
         "version": "1.0.0",
@@ -268,11 +297,35 @@ def retrieve_building_flood_status(model_id: int) -> Response:
     return make_response(geoserver_response.json(), OK)
 
 
-@app.route('/tables/<table_name>/distinct', methods=["GET"])
-def get_distinct_column_values(table_name: str) -> Response:
-    distinct_val_task = tasks.get_distinct_column_values.delay(table_name)
-    distinct_vals = distinct_val_task.get()
-    return make_response(jsonify(distinct_vals))
+@app.route('/models/<int:model_id>', methods=['GET'])
+@check_celery_alive
+def serve_model_output(model_id: int):
+    model_filepath = tasks.get_model_output_filepath_from_model_id.delay(model_id).get()
+    return send_file(pathlib.Path(model_filepath))
+
+
+@app.route('/datasets/update', methods=["POST"])
+@check_celery_alive
+def refresh_lidar_data_sources():
+    """
+    Updates LiDAR data sources to the most recent.
+    Web-scrapes OpenTopography metadata to update the datasets table containing links to LiDAR data sources.
+    Takes a long time to run but needs to be run periodically so that the datasets are up to date.
+    Supported methods: POST
+
+    Returns
+    -------
+    Response
+        ACCEPTED is the expected response. Response body contains Celery taskId
+    """
+
+    # Start task to refresh lidar datasets
+    task = tasks.refresh_lidar_datasets.delay()
+    # Return HTTP Response with task id so it can be monitored with get_status(taskId)
+    return make_response(
+        jsonify({"taskId": task.id}),
+        ACCEPTED
+    )
 
 
 def valid_coordinates(latitude: float, longitude: float) -> bool:
